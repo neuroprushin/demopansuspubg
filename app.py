@@ -11,8 +11,8 @@ import math
 app = Flask(__name__)
 
 # Замени на свои ключи Face++
-API_KEY = "YOUR_FACEPP_API_KEY"
-API_SECRET = "YOUR_FACEPP_API_SECRET"
+API_KEY = "v00GHB3kc6VmuZ2Sufqbx0u_qqt3u07I"
+API_SECRET = "8H7B985VomLOUazkyPqvD5-KkKW-6D_d"
 
 # Описания черт (только челюсть)
 DESCRIPTIONS = {

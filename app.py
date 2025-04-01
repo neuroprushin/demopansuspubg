@@ -110,8 +110,8 @@ def analyze_landmarks(landmarks, headpose, img, show_details=False):
 
     temple_left = landmarks.get("contour_left1")
     temple_right = landmarks.get("contour_right1")
-    jaw_left = landmarks.get("contour_left15")
-    jaw_right = landmarks.get("contour_right15") 
+    jaw_left = landmarks.get("contour_left9")
+    jaw_right = landmarks.get("contour_right9") 
     nose_tip = landmarks.get("nose_tip")
 
     for point in [temple_left, temple_right, jaw_left, jaw_right, nose_tip]:
@@ -227,7 +227,7 @@ def index():
     </style>
 </head>
 <body>
-    <div id="prototype">Beta-porogi-1.0</div>
+    <div id="prototype">Beta-porogi-0.9</div>
     <h1>Калибровка челюсти</h1>
     <input type="file" id="photoInput" accept="image/*">
     <button onclick="analyzeFace()">Анализировать</button>

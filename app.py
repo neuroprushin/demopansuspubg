@@ -15,20 +15,20 @@ app = Flask(__name__)
 API_KEY = "v00GHB3kc6VmuZ2Sufqbx0u_qqt3u07I"
 API_SECRET = "8H7B985VomLOUazkyPqvD5-KkKW-6D_d"
 
-# Описания черт (добавляем эмоции и советы)
+# Описания черт (с эмоциями и советами)
 DESCRIPTIONS = {
     "Широкая челюсть": "Ты — настоящий танк! Высокая стрессоустойчивость делает тебя непробиваемым в конфликтах. Решаешь задачи без спешки, как стратег. Используй это: бери на себя лидерство в сложных ситуациях!",
     "Узкая челюсть": "Ты — молния! Реагируешь быстро, но стресс может выбить из колеи. Твоя сила — в скорости решений, но будь осторожен с импульсивностью. Совет: дыши глубже в хаосе, и ты всех порвёшь!",
     "Средняя челюсть": "Ты — баланс! Умеренная устойчивость к стрессу и гибкость в конфликтах — твои козыри. Иногда можешь сорваться, но это твой драйв. Двигайся дальше: найди золотую середину и веди команду!"
 }
 
-# Пороги (заглушки, откалибруем)
+# Обновлённые пороги
 THRESHOLDS = {
     "челюсть": {
-        "широкая": 1.1,  # jaw_ratio > 1.1
-        "средняя_мин": 0.9,
-        "средняя_макс": 1.1,
-        "узкая": 0.9  # jaw_ratio < 0.9
+        "широкая": 0.83,  # jaw_ratio > 0.83
+        "средняя_мин": 0.78,
+        "средняя_макс": 0.83,
+        "узкая": 0.78  # jaw_ratio < 0.78
     }
 }
 
@@ -52,15 +52,19 @@ def analyze_face_with_facepp(image_data):
         "return_landmark": 2,
         "return_attributes": "headpose"
     }
-    response = requests.post(url, files=files, data=data)
-    if response.status_code == 413:
-        print(f"Face++ Error: 413 Request Entity Too Large")
-        return {"error": "Изображение слишком большое"}
-    if response.status_code != 200:
-        print(f"Face++ Error: {response.status_code}, {response.text}")
-        return {"error": f"Ошибка Face++: {response.text}"}
-    print("JSON от Face++:", json.dumps(response.json(), ensure_ascii=False))
-    return response.json()
+    try:
+        response = requests.post(url, files=files, data=data, timeout=10)
+        if response.status_code == 413:
+            print(f"Face++ Error: 413 Request Entity Too Large")
+            return {"error": "Изображение слишком большое"}
+        if response.status_code != 200:
+            print(f"Face++ Error: {response.status_code}, {response.text}")
+            return {"error": f"Ошибка Face++: {response.status_code} - {response.text}"}
+        print("JSON от Face++:", json.dumps(response.json(), ensure_ascii=False))
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Face++ Request Failed: {str(e)}")
+        return {"error": f"Ошибка связи с Face++: {str(e)}"}
 
 def get_landmarks(data):
     if "faces" not in data or not data["faces"]:
@@ -122,15 +126,15 @@ def analyze_landmarks(landmarks, headpose, img, show_details=False):
 
     # Проверка асимметрии
     asymmetry, left_dist, right_dist = check_asymmetry(nose_tip, jaw_left, jaw_right, face_width)
-    asymmetry_warning = asymmetry > 0.1  # Если асимметрия > 10% от face_width
+    asymmetry_warning = asymmetry > 0.1
 
-    # Рисуем линии между точками (визуализация расстояний)
+    # Рисуем линии между точками
     x_tl, y_tl = get_coords(temple_left)
     x_tr, y_tr = get_coords(temple_right)
     x_jl, y_jl = get_coords(jaw_left)
     x_jr, y_jr = get_coords(jaw_right)
-    cv2.line(img, (int(x_tl), int(y_tl)), (int(x_tr), int(y_tr)), (0, 255, 0), 4)  # Линия между висками
-    cv2.line(img, (int(x_jl), int(y_jl)), (int(x_jr), int(y_jr)), (0, 255, 0), 4)  # Линия между краями челюсти
+    cv2.line(img, (int(x_tl), int(y_tl)), (int(x_tr), int(y_tr)), (0, 255, 0), 4)
+    cv2.line(img, (int(x_jl), int(y_jl)), (int(x_jr), int(y_jr)), (0, 255, 0), 4)
 
     # Классификация челюсти
     if jaw_ratio > THRESHOLDS["челюсть"]["широкая"]:
@@ -140,7 +144,7 @@ def analyze_landmarks(landmarks, headpose, img, show_details=False):
     else:
         jaw_trait = "Средняя челюсть"
 
-    # Выводим информацию на изображение
+    # Выводим информацию
     if show_details:
         cv2.putText(img, f"Face Width: {face_width:.2f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         cv2.putText(img, f"Jaw Width: {jaw_width:.2f}", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
@@ -197,7 +201,7 @@ def index():
     </style>
 </head>
 <body>
-    <div id="prototype">Beta-porogi-0.2</div>
+    <div id="prototype">Beta-porogi-0.3</div>
     <h1>Калибровка челюсти</h1>
     <input type="file" id="photoInput" accept="image/*">
     <button onclick="analyzeFace()">Анализировать</button>
@@ -212,6 +216,7 @@ def index():
             if (!file) { document.getElementById('result').innerText = "Загрузи фото"; return; }
             const formData = new FormData(); formData.append('photo', file);
             try {
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Задержка 1 секунда
                 const response = await fetch('/analyze?details=' + showDetails, { method: 'POST', body: formData });
                 const data = await response.json();
                 document.getElementById('result').innerText = data.result || "Ошибка";
@@ -220,7 +225,9 @@ def index():
                     document.getElementById('imageResult').style.display = 'block';
                     document.getElementById('downloadBtn').style.display = 'block';
                 } else document.getElementById('imageResult').style.display = 'none';
-            } catch (error) { document.getElementById('result').innerText = "Ошибка сети"; }
+            } catch (error) {
+                document.getElementById('result').innerText = "Ошибка: " + error.message;
+            }
         }
         function toggleDetails() { showDetails = !showDetails; document.getElementById('showDetailsBtn').innerText = showDetails ? "Скрыть детали" : "Показать детали"; if (document.getElementById('photoInput').files[0]) analyzeFace(); }
         function downloadLogs() {

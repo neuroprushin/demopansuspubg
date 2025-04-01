@@ -99,7 +99,7 @@ def check_asymmetry(nose_tip, jaw_left, jaw_right, face_width):
 def analyze_landmarks(landmarks, headpose, img, show_details=False):
     # Проверка headpose в самом начале
     pitch, yaw, roll = headpose.get("pitch_angle", 0), headpose.get("yaw_angle", 0), headpose.get("roll_angle", 0)
-    if abs(pitch) > 10 or abs(yaw) > 10 or abs(roll) > 5:
+    if abs(pitch) > 20 or abs(yaw) > 20 or abs(roll) > 5:
         return {}, "Фото не в анфас", None, {}
 
     if not landmarks:
@@ -227,7 +227,7 @@ def index():
     </style>
 </head>
 <body>
-    <div id="prototype">Beta-porogi-0.8</div>
+    <div id="prototype">Beta-porogi-0.9</div>
     <h1>Калибровка челюсти</h1>
     <input type="file" id="photoInput" accept="image/*">
     <button onclick="analyzeFace()">Анализировать</button>

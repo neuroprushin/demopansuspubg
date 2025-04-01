@@ -8,6 +8,7 @@ import base64
 import json
 import math
 import os
+import traceback
 
 app = Flask(__name__)
 
@@ -15,33 +16,37 @@ app = Flask(__name__)
 API_KEY = "v00GHB3kc6VmuZ2Sufqbx0u_qqt3u07I"
 API_SECRET = "8H7B985VomLOUazkyPqvD5-KkKW-6D_d"
 
-# Описания черт (с эмоциями и советами)
 DESCRIPTIONS = {
     "Широкая челюсть": "Ты — настоящий танк! Высокая стрессоустойчивость делает тебя непробиваемым в конфликтах. Решаешь задачи без спешки, как стратег. Используй это: бери на себя лидерство в сложных ситуациях!",
     "Узкая челюсть": "Ты — молния! Реагируешь быстро, но стресс может выбить из колеи. Твоя сила — в скорости решений, но будь осторожен с импульсивностью. Совет: дыши глубже в хаосе, и ты всех порвёшь!",
     "Средняя челюсть": "Ты — баланс! Умеренная устойчивость к стрессу и гибкость в конфликтах — твои козыри. Иногда можешь сорваться, но это твой драйв. Двигайся дальше: найди золотую середину и веди команду!"
 }
 
-# Обновлённые пороги
 THRESHOLDS = {
     "челюсть": {
-        "широкая": 0.83,  # jaw_ratio > 0.83
-        "средняя_мин": 0.78,
-        "средняя_макс": 0.83,
-        "узкая": 0.78  # jaw_ratio < 0.78
+        "широкая": -35,  # jaw_diff > -35
+        "средняя_мин": -45,
+        "средняя_макс": -35,
+        "узкая": -45  # jaw_diff <= -45
     }
 }
 
 def resize_image(image_data, max_size=800):
-    img = cv2.imdecode(np.frombuffer(image_data, np.uint8), cv2.IMREAD_COLOR)
-    height, width = img.shape[:2]
-    if max(height, width) > max_size:
-        scale = max_size / max(height, width)
-        new_width = int(width * scale)
-        new_height = int(height * scale)
-        img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
-    _, buffer = cv2.imencode('.jpg', img)
-    return buffer.tobytes()
+    try:
+        img = cv2.imdecode(np.frombuffer(image_data, np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            raise ValueError("Не удалось декодировать изображение")
+        height, width = img.shape[:2]
+        if max(height, width) > max_size:
+            scale = max_size / max(height, width)
+            new_width = int(width * scale)
+            new_height = int(height * scale)
+            img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        _, buffer = cv2.imencode('.jpg', img)
+        return buffer.tobytes()
+    except Exception as e:
+        print(f"Ошибка в resize_image: {str(e)}")
+        raise
 
 def analyze_face_with_facepp(image_data):
     url = "https://api-us.faceplusplus.com/facepp/v3/detect"
@@ -105,30 +110,31 @@ def analyze_landmarks(landmarks, headpose, img, show_details=False):
     result_texts = []
     height, width = img.shape[:2]
 
-    # Точки для измерения
     temple_left = landmarks.get("contour_left1")
     temple_right = landmarks.get("contour_right1")
     jaw_left = landmarks.get("contour_left9")
     jaw_right = landmarks.get("contour_right9")
     nose_tip = landmarks.get("nose_tip")
 
-    # Рисуем точки
     for point in [temple_left, temple_right, jaw_left, jaw_right, nose_tip]:
         x, y = get_coords(point)
         x, y = int(x), int(y)
         if 0 <= x < width and 0 <= y < height:
             cv2.circle(img, (x, y), 7, (255, 0, 0), 3)
 
-    # Измеряем расстояния
     face_width = distance(temple_left, temple_right)
     jaw_width = distance(jaw_left, jaw_right)
     jaw_ratio = jaw_width / face_width if face_width > 0 else 0
+    jaw_diff = jaw_width - face_width
 
-    # Проверка асимметрии
     asymmetry, left_dist, right_dist = check_asymmetry(nose_tip, jaw_left, jaw_right, face_width)
     asymmetry_warning = asymmetry > 0.1
+    headpose_warning = abs(pitch) > 8 or abs(yaw) > 8  # Более строгий порог для калибровки
 
-    # Рисуем линии между точками
+    if asymmetry_warning or headpose_warning:
+        warning_text = "Предупреждение: Высокая асимметрия или наклон головы"
+        cv2.putText(img, warning_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
     x_tl, y_tl = get_coords(temple_left)
     x_tr, y_tr = get_coords(temple_right)
     x_jl, y_jl = get_coords(jaw_left)
@@ -136,26 +142,27 @@ def analyze_landmarks(landmarks, headpose, img, show_details=False):
     cv2.line(img, (int(x_tl), int(y_tl)), (int(x_tr), int(y_tr)), (0, 255, 0), 4)
     cv2.line(img, (int(x_jl), int(y_jl)), (int(x_jr), int(y_jr)), (0, 255, 0), 4)
 
-    # Классификация челюсти
-    if jaw_ratio > THRESHOLDS["челюсть"]["широкая"]:
+    if jaw_diff > THRESHOLDS["челюсть"]["широкая"]:
         jaw_trait = "Широкая челюсть"
-    elif jaw_ratio < THRESHOLDS["челюсть"]["узкая"]:
+    elif jaw_diff < THRESHOLDS["челюсть"]["узкая"]:
         jaw_trait = "Узкая челюсть"
     else:
         jaw_trait = "Средняя челюсть"
 
-    # Выводим информацию
     if show_details:
         cv2.putText(img, f"Face Width: {face_width:.2f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         cv2.putText(img, f"Jaw Width: {jaw_width:.2f}", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         cv2.putText(img, f"Jaw Ratio: {jaw_ratio:.2f}", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-        cv2.putText(img, f"Asymmetry: {asymmetry:.2f}", (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        cv2.putText(img, f"Jaw Diff: {jaw_diff:.2f}", (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        cv2.putText(img, f"Asymmetry: {asymmetry:.2f}", (10, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         if asymmetry_warning:
-            cv2.putText(img, "Warning: Face asymmetry detected", (10, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            cv2.putText(img, "Warning: Face asymmetry detected", (10, 210), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        if headpose_warning:
+            cv2.putText(img, "Warning: Head pose may affect results", (10, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
     if jaw_trait in DESCRIPTIONS:
         result_texts.append(DESCRIPTIONS[jaw_trait])
-        cv2.putText(img, jaw_trait, (10, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(img, jaw_trait, (10, 270), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
     result_text = " ".join(result_texts) if result_texts else "Не удалось определить"
     _, buffer = cv2.imencode('.jpg', img)
@@ -165,6 +172,7 @@ def analyze_landmarks(landmarks, headpose, img, show_details=False):
         "face_width": face_width,
         "jaw_width": jaw_width,
         "jaw_ratio": jaw_ratio,
+        "jaw_diff": jaw_diff,
         "asymmetry": asymmetry,
         "left_jaw_dist": left_dist,
         "right_jaw_dist": right_dist,
@@ -201,7 +209,7 @@ def index():
     </style>
 </head>
 <body>
-    <div id="prototype">Beta-porogi-0.3</div>
+    <div id="prototype">Beta-porogi-0.6</div>
     <h1>Калибровка челюсти</h1>
     <input type="file" id="photoInput" accept="image/*">
     <button onclick="analyzeFace()">Анализировать</button>
@@ -216,8 +224,12 @@ def index():
             if (!file) { document.getElementById('result').innerText = "Загрузи фото"; return; }
             const formData = new FormData(); formData.append('photo', file);
             try {
-                await new Promise(resolve => setTimeout(resolve, 1000)); // Задержка 1 секунда
+                await new Promise(resolve => setTimeout(resolve, 1000));
                 const response = await fetch('/analyze?details=' + showDetails, { method: 'POST', body: formData });
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(`Сервер вернул ошибку: ${response.status} - ${text.slice(0, 100)}`);
+                }
                 const data = await response.json();
                 document.getElementById('result').innerText = data.result || "Ошибка";
                 if (data.image) {
@@ -240,31 +252,39 @@ def index():
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
-    show_details = request.args.get('details', 'false').lower() == 'true'
-    file = request.files['photo']
-    if not file:
-        return jsonify({"result": "Нет фото"})
+    try:
+        show_details = request.args.get('details', 'false').lower() == 'true'
+        if 'photo' not in request.files:
+            return jsonify({"result": "Нет фото"}), 400
 
-    image_data = file.read()
-    image_data = resize_image(image_data, max_size=800)
+        file = request.files['photo']
+        image_data = file.read()
+        image_data = resize_image(image_data, max_size=800)
 
-    face_data = analyze_face_with_facepp(image_data)
-    if "error" in face_data:
-        return jsonify({"result": face_data["error"]})
+        face_data = analyze_face_with_facepp(image_data)
+        if "error" in face_data:
+            return jsonify({"result": face_data["error"]}), 400
 
-    img = cv2.imdecode(np.frombuffer(image_data, np.uint8), cv2.IMREAD_COLOR)
-    landmarks = get_landmarks(face_data)
-    headpose = face_data["faces"][0]["attributes"]["headpose"] if "faces" in face_data and face_data["faces"] else {}
-    traits, result_text, image_base64, log_data = analyze_landmarks(landmarks, headpose, img, show_details)
+        img = cv2.imdecode(np.frombuffer(image_data, np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            return jsonify({"result": "Не удалось декодировать изображение"}), 400
 
-    return jsonify({"result": result_text, "image": image_base64})
+        landmarks = get_landmarks(face_data)
+        headpose = face_data["faces"][0]["attributes"]["headpose"] if "faces" in face_data and face_data["faces"] else {}
+        traits, result_text, image_base64, log_data = analyze_landmarks(landmarks, headpose, img, show_details)
+
+        return jsonify({"result": result_text, "image": image_base64})
+    except Exception as e:
+        print(f"Ошибка в /analyze: {str(e)}")
+        print(traceback.format_exc())
+        return jsonify({"result": f"Внутренняя ошибка сервера: {str(e)}"}), 500
 
 @app.route('/download_logs')
 def download_logs():
     try:
         return send_file('logs.json', as_attachment=True, download_name='logs.json')
     except FileNotFoundError:
-        return "Лог-файл не найден. Обработайте хотя бы одно фото.", 404
+        return jsonify({"result": "Лог-файл не найден. Обработайте хотя бы одно фото."}), 404
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)

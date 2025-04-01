@@ -97,14 +97,13 @@ def check_asymmetry(nose_tip, jaw_left, jaw_right, face_width):
     return asymmetry, left_dist, right_dist
 
 def analyze_landmarks(landmarks, headpose, img, show_details=False):
-    if not landmarks:
-        cv2.putText(img, "Нет лица", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-        return {}, "Нет лица", img, {}
-
+    # Проверка headpose в самом начале
     pitch, yaw, roll = headpose.get("pitch_angle", 0), headpose.get("yaw_angle", 0), headpose.get("roll_angle", 0)
     if abs(pitch) > 10 or abs(yaw) > 10 or abs(roll) > 5:
-        cv2.putText(img, "Фото не в анфас", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-        return {}, "Фото не в анфас", img, {}
+        return {}, "Фото не в анфас", None, {}
+
+    if not landmarks:
+        return {}, "Нет лица", None, {}
 
     result_texts = []
     height, width = img.shape[:2]
@@ -174,8 +173,12 @@ def analyze_landmarks(landmarks, headpose, img, show_details=False):
             raise ValueError(f"buffer не является ndarray, тип: {type(buffer)}")
         if buffer.size == 0:
             raise ValueError("buffer пустой")
-        print(f"Тип buffer: {type(buffer)}, размер: {buffer.size}")
-        image_base64 = "data:image/jpeg;base64," + base64.b64encode(buffer).decode('utf-8')
+        if buffer.dtype != np.uint8:
+            raise ValueError(f"buffer имеет неправильный тип данных: {buffer.dtype}, ожидается uint8")
+        print(f"Тип buffer: {type(buffer)}, размер: {buffer.size}, dtype: {buffer.dtype}")
+        # Преобразуем buffer в bytes
+        buffer_bytes = buffer.tobytes()
+        image_base64 = "data:image/jpeg;base64," + base64.b64encode(buffer_bytes).decode('utf-8')
         if not isinstance(image_base64, str):
             raise ValueError(f"image_base64 не строка, тип: {type(image_base64)}")
         print(f"Тип image_base64: {type(image_base64)}")
@@ -224,7 +227,7 @@ def index():
     </style>
 </head>
 <body>
-    <div id="prototype">Beta-porogi-0.7</div>
+    <div id="prototype">Beta-porogi-0.8</div>
     <h1>Калибровка челюсти</h1>
     <input type="file" id="photoInput" accept="image/*">
     <button onclick="analyzeFace()">Анализировать</button>
@@ -291,6 +294,15 @@ def analyze():
         img = cv2.imdecode(np.frombuffer(image_data, np.uint8), cv2.IMREAD_COLOR)
         if img is None:
             return jsonify({"result": "Не удалось декодировать изображение"}), 400
+
+        # Проверка img
+        if not isinstance(img, np.ndarray):
+            return jsonify({"result": "Некорректное изображение: img не является ndarray"}), 400
+        if len(img.shape) != 3 or img.shape[2] != 3:
+            return jsonify({"result": f"Некорректное изображение: неправильные размеры {img.shape}, ожидается (height, width, 3)"}), 400
+        if img.dtype != np.uint8:
+            return jsonify({"result": f"Некорректное изображение: неправильный тип данных {img.dtype}, ожидается uint8"}), 400
+        print(f"img shape: {img.shape}, dtype: {img.dtype}")
 
         landmarks = get_landmarks(face_data)
         headpose = face_data["faces"][0]["attributes"]["headpose"] if "faces" in face_data and face_data["faces"] else {}

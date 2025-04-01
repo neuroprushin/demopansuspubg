@@ -12,7 +12,6 @@ import traceback
 
 app = Flask(__name__)
 
-# Замени на свои ключи Face++
 API_KEY = "v00GHB3kc6VmuZ2Sufqbx0u_qqt3u07I"
 API_SECRET = "8H7B985VomLOUazkyPqvD5-KkKW-6D_d"
 
@@ -129,7 +128,7 @@ def analyze_landmarks(landmarks, headpose, img, show_details=False):
 
     asymmetry, left_dist, right_dist = check_asymmetry(nose_tip, jaw_left, jaw_right, face_width)
     asymmetry_warning = asymmetry > 0.1
-    headpose_warning = abs(pitch) > 8 or abs(yaw) > 8  # Более строгий порог для калибровки
+    headpose_warning = abs(pitch) > 8 or abs(yaw) > 8
 
     if asymmetry_warning or headpose_warning:
         warning_text = "Предупреждение: Высокая асимметрия или наклон головы"
@@ -165,8 +164,24 @@ def analyze_landmarks(landmarks, headpose, img, show_details=False):
         cv2.putText(img, jaw_trait, (10, 270), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
     result_text = " ".join(result_texts) if result_texts else "Не удалось определить"
-    _, buffer = cv2.imencode('.jpg', img)
-    img_str = "data:image/jpeg;base64," + base64.b64encode(buffer).decode('utf-8')
+
+    # Кодирование изображения с проверками
+    try:
+        retval, buffer = cv2.imencode('.jpg', img)
+        if not retval:
+            raise ValueError("Не удалось закодировать изображение")
+        if not isinstance(buffer, np.ndarray):
+            raise ValueError(f"buffer не является ndarray, тип: {type(buffer)}")
+        if buffer.size == 0:
+            raise ValueError("buffer пустой")
+        print(f"Тип buffer: {type(buffer)}, размер: {buffer.size}")
+        image_base64 = "data:image/jpeg;base64," + base64.b64encode(buffer).decode('utf-8')
+        if not isinstance(image_base64, str):
+            raise ValueError(f"image_base64 не строка, тип: {type(image_base64)}")
+        print(f"Тип image_base64: {type(image_base64)}")
+    except Exception as e:
+        print(f"Ошибка при кодировании изображения: {str(e)}")
+        return {}, "Ошибка: Не удалось закодировать изображение", None, {}
 
     log_data = {
         "face_width": face_width,
@@ -188,7 +203,7 @@ def analyze_landmarks(landmarks, headpose, img, show_details=False):
         json.dump(log_data, f, ensure_ascii=False)
         f.write('\n')
 
-    return {}, result_text, img_str, log_data
+    return {}, result_text, image_base64, log_data
 
 @app.route('/')
 def index():
@@ -209,7 +224,7 @@ def index():
     </style>
 </head>
 <body>
-    <div id="prototype">Beta-porogi-0.6</div>
+    <div id="prototype">Beta-porogi-0.7</div>
     <h1>Калибровка челюсти</h1>
     <input type="file" id="photoInput" accept="image/*">
     <button onclick="analyzeFace()">Анализировать</button>
@@ -228,7 +243,7 @@ def index():
                 const response = await fetch('/analyze?details=' + showDetails, { method: 'POST', body: formData });
                 if (!response.ok) {
                     const text = await response.text();
-                    throw new Error(`Сервер вернул ошибку: ${response.status} - ${text.slice(0, 100)}`);
+                    throw new Error(`Сервер вернул ошибку: ${response.status} - ${text}`);
                 }
                 const data = await response.json();
                 document.getElementById('result').innerText = data.result || "Ошибка";
@@ -236,7 +251,10 @@ def index():
                     document.getElementById('imageResult').src = data.image;
                     document.getElementById('imageResult').style.display = 'block';
                     document.getElementById('downloadBtn').style.display = 'block';
-                } else document.getElementById('imageResult').style.display = 'none';
+                } else {
+                    document.getElementById('imageResult').style.display = 'none';
+                    document.getElementById('downloadBtn').style.display = 'none';
+                }
             } catch (error) {
                 document.getElementById('result').innerText = "Ошибка: " + error.message;
             }
@@ -259,7 +277,12 @@ def analyze():
 
         file = request.files['photo']
         image_data = file.read()
+        if not image_data:
+            return jsonify({"result": "Файл пустой"}), 400
+
+        print("Размер image_data:", len(image_data))
         image_data = resize_image(image_data, max_size=800)
+        print("Размер image_data после resize:", len(image_data))
 
         face_data = analyze_face_with_facepp(image_data)
         if "error" in face_data:
@@ -272,6 +295,9 @@ def analyze():
         landmarks = get_landmarks(face_data)
         headpose = face_data["faces"][0]["attributes"]["headpose"] if "faces" in face_data and face_data["faces"] else {}
         traits, result_text, image_base64, log_data = analyze_landmarks(landmarks, headpose, img, show_details)
+
+        if image_base64 is None:
+            return jsonify({"result": result_text}), 400
 
         return jsonify({"result": result_text, "image": image_base64})
     except Exception as e:

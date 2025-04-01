@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request, jsonify, Response
+from flask import Flask, render_template_string, request, jsonify, Response, send_file
 import requests
 import cv2
 import numpy as np
@@ -7,6 +7,7 @@ import io
 import base64
 import json
 import math
+import os
 
 app = Flask(__name__)
 
@@ -14,20 +15,20 @@ app = Flask(__name__)
 API_KEY = "v00GHB3kc6VmuZ2Sufqbx0u_qqt3u07I"
 API_SECRET = "8H7B985VomLOUazkyPqvD5-KkKW-6D_d"
 
-# Описания черт (только челюсть)
+# Описания черт (добавляем эмоции и советы)
 DESCRIPTIONS = {
-    "Широкая челюсть": "Ты высоко стрессоустойчив, спокойно относишься к конфликтам и предпочитаешь решать задачи постепенно, не торопясь.",
-    "Узкая челюсть": "Ты менее устойчив к стрессу, склонен к резким реакциям и стремишься быстро устранить проблемы, иногда импульсивно.",
-    "Средняя челюсть": "Ты умеренно устойчив к стрессу, можешь быть гибким в конфликтах, но иногда реагируешь импульсивно."
+    "Широкая челюсть": "Ты — настоящий танк! Высокая стрессоустойчивость делает тебя непробиваемым в конфликтах. Решаешь задачи без спешки, как стратег. Используй это: бери на себя лидерство в сложных ситуациях!",
+    "Узкая челюсть": "Ты — молния! Реагируешь быстро, но стресс может выбить из колеи. Твоя сила — в скорости решений, но будь осторожен с импульсивностью. Совет: дыши глубже в хаосе, и ты всех порвёшь!",
+    "Средняя челюсть": "Ты — баланс! Умеренная устойчивость к стрессу и гибкость в конфликтах — твои козыри. Иногда можешь сорваться, но это твой драйв. Двигайся дальше: найди золотую середину и веди команду!"
 }
 
-# Сырые пороги (будем калибровать)
+# Пороги (заглушки, откалибруем)
 THRESHOLDS = {
     "челюсть": {
-        "широкая": 0.15,  # Заглушка, откалибруем
-        "средняя_мин": 0.05,
-        "средняя_макс": 0.15,
-        "узкая": 0.05
+        "широкая": 1.1,  # jaw_ratio > 1.1
+        "средняя_мин": 0.9,
+        "средняя_макс": 1.1,
+        "узкая": 0.9  # jaw_ratio < 0.9
     }
 }
 
@@ -73,64 +74,19 @@ def get_coords(point):
         return 0, 0
     return point["x"], point["y"]
 
-def draw_tilted_temple_lines(img, temple_left, temple_right, headpose, height, width, jaw_left, jaw_right):
-    x_tl, y_tl = get_coords(temple_left)
-    x_tr, y_tr = get_coords(temple_right)
-    x_jl, y_jl = get_coords(jaw_left)
-    x_jr, y_jr = get_coords(jaw_right)
-    
-    roll = headpose.get("roll_angle", 0)
-    pitch = headpose.get("pitch_angle", 0)
-    yaw = headpose.get("yaw_angle", 0)
-    
-    angle = math.radians(roll) + math.radians(pitch) * 0.5 + math.radians(yaw) * 0.1
-    
-    length_left = abs(y_jl - y_tl)
-    length_right = abs(y_jr - y_tr)
-    
-    end_x_tl = x_tl + length_left * math.sin(angle)
-    end_y_tl = y_tl + length_left * math.cos(angle)
-    end_x_tr = x_tr + length_right * math.sin(angle)
-    end_y_tr = y_tr + length_right * math.cos(angle)
-    
-    # Корректировка для равенства расстояний
-    dist_left = abs(x_jl - end_x_tl) if end_x_tl != x_tl else abs(y_jl - end_y_tl)
-    dist_right = abs(x_jr - end_x_tr) if end_x_tr != x_tr else abs(y_jr - end_y_tr)
-    tolerance = 0.5
-    for _ in range(10):
-        if abs(dist_left - dist_right) > tolerance:
-            angle_correction = (dist_left - dist_right) * 0.01
-            angle += math.radians(angle_correction)
-            end_x_tl = x_tl + length_left * math.sin(angle)
-            end_y_tl = y_tl + length_left * math.cos(angle)
-            end_x_tr = x_tr + length_right * math.sin(angle)
-            end_y_tr = y_tr + length_right * math.cos(angle)
-            dist_left = abs(x_jl - end_x_tl) if end_x_tl != x_tl else abs(y_jl - end_y_tl)
-            dist_right = abs(x_jr - end_x_tr) if end_x_tr != x_tr else abs(y_jr - end_y_tr)
-        else:
-            break
-    
-    end_x_tl = max(0, min(width - 1, int(end_x_tl)))
-    end_y_tl = max(0, min(height - 1, int(end_y_tl)))
-    end_x_tr = max(0, min(width - 1, int(end_x_tr)))
-    end_y_tr = max(0, min(height - 1, int(end_y_tr)))
-    
-    cv2.line(img, (int(x_tl), int(y_tl)), (end_x_tl, end_y_tl), (0, 255, 0), 4)
-    cv2.line(img, (int(x_tr), int(y_tr)), (end_x_tr, end_y_tr), (0, 255, 0), 4)
-    
-    return img, (end_x_tl, end_y_tl), (end_x_tr, end_y_tr), dist_left, dist_right
+def distance(point1, point2):
+    x1, y1 = get_coords(point1)
+    x2, y2 = get_coords(point2)
+    return ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5 if x1 != 0 and y1 != 0 and x2 != 0 and y2 != 0 else 0
 
-def check_jaw_position(jaw_left, jaw_right, temple_left, temple_right, end_temple_left, end_temple_right):
-    x_jl, y_jl = get_coords(jaw_left)
-    x_jr, y_jr = get_coords(jaw_right)
-    x_tl, y_tl = get_coords(temple_left)
-    x_tr, y_tr = get_coords(temple_right)
-    if 0 in [x_jl, x_jr, x_tl, x_tr]:
-        return "внутри_линий"
-    if (x_jl < min(x_tl, end_temple_left[0]) and x_jr > max(x_tr, end_temple_right[0])) or \
-       (x_jl > max(x_tl, end_temple_left[0]) and x_jr < min(x_tr, end_temple_right[0])):
-        return "за_линиями"
-    return "внутри_линий"
+def check_asymmetry(nose_tip, jaw_left, jaw_right, face_width):
+    nose_x, nose_y = get_coords(nose_tip)
+    left_x, left_y = get_coords(jaw_left)
+    right_x, right_y = get_coords(jaw_right)
+    left_dist = ((left_x - nose_x) ** 2 + (left_y - nose_y) ** 2) ** 0.5
+    right_dist = ((right_x - nose_x) ** 2 + (right_y - nose_y) ** 2) ** 0.5
+    asymmetry = abs(left_dist - right_dist) / face_width if face_width > 0 else 0
+    return asymmetry, left_dist, right_dist
 
 def analyze_landmarks(landmarks, headpose, img, show_details=False):
     if not landmarks:
@@ -144,51 +100,54 @@ def analyze_landmarks(landmarks, headpose, img, show_details=False):
 
     result_texts = []
     height, width = img.shape[:2]
-    for point_name, point in landmarks.items():
-        x, y = get_coords(point)
-        x, y = int(x), int(y)
-        if 0 <= x < width and 0 <= y < height:
-            cv2.circle(img, (x, y), 3, (255, 255, 255), 3)
 
-    face_left = landmarks.get("contour_left1")
-    face_right = landmarks.get("contour_right1")
-    jaw_left = landmarks.get("contour_left9")
-    jaw_right = landmarks.get("contour_right9")
+    # Точки для измерения
     temple_left = landmarks.get("contour_left1")
     temple_right = landmarks.get("contour_right1")
+    jaw_left = landmarks.get("contour_left9")
+    jaw_right = landmarks.get("contour_right9")
+    nose_tip = landmarks.get("nose_tip")
 
-    for point in [face_left, face_right, jaw_left, jaw_right, temple_left, temple_right]:
+    # Рисуем точки
+    for point in [temple_left, temple_right, jaw_left, jaw_right, nose_tip]:
         x, y = get_coords(point)
         x, y = int(x), int(y)
         if 0 <= x < width and 0 <= y < height:
             cv2.circle(img, (x, y), 7, (255, 0, 0), 3)
 
-    img, end_temple_left, end_temple_right, dist_left, dist_right = draw_tilted_temple_lines(img, temple_left, temple_right, headpose, height, width, jaw_left, jaw_right)
+    # Измеряем расстояния
+    face_width = distance(temple_left, temple_right)
+    jaw_width = distance(jaw_left, jaw_right)
+    jaw_ratio = jaw_width / face_width if face_width > 0 else 0
 
-    jaw_pos = check_jaw_position(jaw_left, jaw_right, temple_left, temple_right, end_temple_left, end_temple_right)
-    face_width = distance(face_left, face_right)
-    avg_dist = (dist_left + dist_right) / 2 if (dist_left > 0 and dist_right > 0) else 0
-    normalized_dist = avg_dist / face_width if face_width > 0 else 0
-    dist_diff = abs(dist_left - dist_right)
+    # Проверка асимметрии
+    asymmetry, left_dist, right_dist = check_asymmetry(nose_tip, jaw_left, jaw_right, face_width)
+    asymmetry_warning = asymmetry > 0.1  # Если асимметрия > 10% от face_width
 
-    if show_details:
-        cv2.putText(img, f"Dist Left: {dist_left:.2f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-        cv2.putText(img, f"Dist Right: {dist_right:.2f}", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-        cv2.putText(img, f"Avg Dist: {avg_dist:.2f}", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-        cv2.putText(img, f"Norm Dist: {normalized_dist:.2f}", (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-        cv2.putText(img, f"Diff: {dist_diff:.2f}", (10, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-        cv2.putText(img, f"Inside Lines: {jaw_pos == 'внутри_линий'}", (10, 210), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+    # Рисуем линии между точками (визуализация расстояний)
+    x_tl, y_tl = get_coords(temple_left)
+    x_tr, y_tr = get_coords(temple_right)
+    x_jl, y_jl = get_coords(jaw_left)
+    x_jr, y_jr = get_coords(jaw_right)
+    cv2.line(img, (int(x_tl), int(y_tl)), (int(x_tr), int(y_tr)), (0, 255, 0), 4)  # Линия между висками
+    cv2.line(img, (int(x_jl), int(y_jl)), (int(x_jr), int(y_jr)), (0, 255, 0), 4)  # Линия между краями челюсти
 
-    if jaw_pos == "за_линиями":
-        if normalized_dist > THRESHOLDS["челюсть"]["широкая"]:
-            jaw_trait = "Широкая челюсть"
-        else:
-            jaw_trait = "Средняя челюсть"
+    # Классификация челюсти
+    if jaw_ratio > THRESHOLDS["челюсть"]["широкая"]:
+        jaw_trait = "Широкая челюсть"
+    elif jaw_ratio < THRESHOLDS["челюсть"]["узкая"]:
+        jaw_trait = "Узкая челюсть"
     else:
-        if normalized_dist < THRESHOLDS["челюсть"]["узкая"]:
-            jaw_trait = "Узкая челюсть"
-        else:
-            jaw_trait = "Средняя челюсть"
+        jaw_trait = "Средняя челюсть"
+
+    # Выводим информацию на изображение
+    if show_details:
+        cv2.putText(img, f"Face Width: {face_width:.2f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        cv2.putText(img, f"Jaw Width: {jaw_width:.2f}", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        cv2.putText(img, f"Jaw Ratio: {jaw_ratio:.2f}", (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        cv2.putText(img, f"Asymmetry: {asymmetry:.2f}", (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        if asymmetry_warning:
+            cv2.putText(img, "Warning: Face asymmetry detected", (10, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
     if jaw_trait in DESCRIPTIONS:
         result_texts.append(DESCRIPTIONS[jaw_trait])
@@ -199,21 +158,23 @@ def analyze_landmarks(landmarks, headpose, img, show_details=False):
     img_str = "data:image/jpeg;base64," + base64.b64encode(buffer).decode('utf-8')
 
     log_data = {
-        "dist_left": dist_left,
-        "dist_right": dist_right,
-        "avg_dist": avg_dist,
-        "normalized_dist": normalized_dist,
-        "dist_diff": dist_diff,
-        "inside_lines": jaw_pos == "внутри_линий",
-        "headpose": headpose,
         "face_width": face_width,
-        "jaw_left": get_coords(jaw_left),
-        "jaw_right": get_coords(jaw_right),
+        "jaw_width": jaw_width,
+        "jaw_ratio": jaw_ratio,
+        "asymmetry": asymmetry,
+        "left_jaw_dist": left_dist,
+        "right_jaw_dist": right_dist,
+        "headpose": headpose,
         "temple_left": get_coords(temple_left),
         "temple_right": get_coords(temple_right),
-        "end_temple_left": end_temple_left,
-        "end_temple_right": end_temple_right
+        "jaw_left": get_coords(jaw_left),
+        "jaw_right": get_coords(jaw_right),
+        "nose_tip": get_coords(nose_tip)
     }
+
+    with open('logs.json', 'a') as f:
+        json.dump(log_data, f, ensure_ascii=False)
+        f.write('\n')
 
     return {}, result_text, img_str, log_data
 
@@ -232,14 +193,16 @@ def index():
         button:hover { background-color: #00cc00; }
         #result { margin-top: 20px; font-size: 18px; }
         #imageResult { margin-top: 20px; max-width: 100%; }
+        #downloadBtn { display: none; margin-top: 10px; }
     </style>
 </head>
 <body>
-    <div id="prototype">Beta-porogi-0.1</div>
+    <div id="prototype">Beta-porogi-0.2</div>
     <h1>Калибровка челюсти</h1>
     <input type="file" id="photoInput" accept="image/*">
     <button onclick="analyzeFace()">Анализировать</button>
     <button id="showDetailsBtn" onclick="toggleDetails()">Показать детали</button>
+    <button id="downloadBtn" onclick="downloadLogs()">Скачать логи</button>
     <p id="result"></p>
     <img id="imageResult" style="display: none;">
     <script>
@@ -255,10 +218,14 @@ def index():
                 if (data.image) {
                     document.getElementById('imageResult').src = data.image;
                     document.getElementById('imageResult').style.display = 'block';
+                    document.getElementById('downloadBtn').style.display = 'block';
                 } else document.getElementById('imageResult').style.display = 'none';
             } catch (error) { document.getElementById('result').innerText = "Ошибка сети"; }
         }
         function toggleDetails() { showDetails = !showDetails; document.getElementById('showDetailsBtn').innerText = showDetails ? "Скрыть детали" : "Показать детали"; if (document.getElementById('photoInput').files[0]) analyzeFace(); }
+        function downloadLogs() {
+            window.location.href = '/download_logs';
+        }
     </script>
 </body>
 </html>
@@ -283,11 +250,14 @@ def analyze():
     headpose = face_data["faces"][0]["attributes"]["headpose"] if "faces" in face_data and face_data["faces"] else {}
     traits, result_text, image_base64, log_data = analyze_landmarks(landmarks, headpose, img, show_details)
 
-    with open('logs.json', 'a') as f:
-        json.dump(log_data, f, ensure_ascii=False)
-        f.write('\n')
-
     return jsonify({"result": result_text, "image": image_base64})
+
+@app.route('/download_logs')
+def download_logs():
+    try:
+        return send_file('logs.json', as_attachment=True, download_name='logs.json')
+    except FileNotFoundError:
+        return "Лог-файл не найден. Обработайте хотя бы одно фото.", 404
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)

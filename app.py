@@ -110,8 +110,8 @@ def analyze_landmarks(landmarks, headpose, img, show_details=False):
 
     temple_left = landmarks.get("contour_left1")
     temple_right = landmarks.get("contour_right1")
-    jaw_left = landmarks.get("contour_left9")
-    jaw_right = landmarks.get("contour_right9") 
+    jaw_left = landmarks.get("contour_left5")
+    jaw_right = landmarks.get("contour_right5") 
     nose_tip = landmarks.get("nose_tip")
 
     for point in [temple_left, temple_right, jaw_left, jaw_right, nose_tip]:

@@ -52,7 +52,7 @@ def get_coords(point):
 def distance(point1, point2):
     x1, y1 = get_coords(point1)
     x2, y2 = get_coords(point2)
-    return ((x2 - x1)  2 + (y2 - y1)  2) ** 0.5 if x1 != 0 and y1 != 0 and x2 != 0 and y2 != 0 else 0
+    return ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5 if x1 != 0 and y1 != 0 and x2 != 0 and y2 != 0 else 0
 
 # Function to analyze landmarks
 def analyze_landmarks(landmarks):

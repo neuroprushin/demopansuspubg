@@ -9,12 +9,11 @@ from io import BytesIO
 
 app = Flask(__name__)
 
-# Face++ API credentials
 API_KEY = "v00GHB3kc6VmuZ2Sufqbx0u_qqt3u07I"
 API_SECRET = "8H7B985VomLOUazkyPqvD5-KkKW-6D_d"
 FACEPP_URL = "https://api-us.faceplusplus.com/facepp/v3/detect"
 
-# Thresholds for jaw classification (Beta-porogi-1.4)
+# Thresholds for jaw classification (Beta-porogi-1.5)
 THRESHOLDS = {
     "челюсть": {
         "узкая": 0.8077,  # jaw_ratio <= 0.8077
@@ -63,8 +62,16 @@ def analyze_landmarks(landmarks):
         jaw_right = landmarks.get("contour_right9")
         nose_tip = landmarks.get("nose_tip")
 
-        if not all([temple_left, temple_right, jaw_left, jaw_right, nose_tip]):
-            raise ValueError("Не удалось извлечь все ключевые точки")
+        # Проверяем, все ли точки найдены
+        missing_points = [name for name, point in [
+            ("contour_left1", temple_left),
+            ("contour_right1", temple_right),
+            ("contour_left9", jaw_left),
+            ("contour_right9", jaw_right),
+            ("nose_tip", nose_tip)
+        ] if point is None]
+        if missing_points:
+            raise ValueError(f"Не удалось извлечь ключевые точки: {missing_points}")
 
         face_width = distance(temple_left, temple_right)
         jaw_width = distance(jaw_left, jaw_right)
@@ -101,7 +108,7 @@ def call_facepp_api(image_data):
             "image_file": ("image.jpg", image_data, "image/jpeg"),
             "api_key": (None, API_KEY),
             "api_secret": (None, API_SECRET),
-            "return_landmark": (None, "all"),
+            "return_landmark": (None, "2"),  # Используем 106 точек
             "return_attributes": (None, "headpose")
         }
         response = requests.post(FACEPP_URL, files=files, timeout=10)
@@ -167,14 +174,22 @@ def process_image():
         # Save to logs
         log_entry = analysis.copy()
         log_file = "logs.json"
-        if os.path.exists(log_file):
-            with open(log_file, "r") as f:
-                logs = json.load(f)
-        else:
-            logs = []
-        logs.append(log_entry)
-        with open(log_file, "w") as f:
-            json.dump(logs, f, indent=4)
+        try:
+            if os.path.exists(log_file):
+                try:
+                    with open(log_file, "r") as f:
+                        logs = json.load(f)
+                except json.JSONDecodeError:
+                    print(f"Ошибка: logs.json повреждён, создаём новый")
+                    logs = []
+            else:
+                logs = []
+            logs.append(log_entry)
+            with open(log_file, "w") as f:
+                json.dump(logs, f, indent=4)
+        except Exception as e:
+            print(f"Ошибка при сохранении логов: {str(e)}")
+            # Продолжаем работу, даже если логи не удалось сохранить
 
         return jsonify(analysis)
     except Exception as e:

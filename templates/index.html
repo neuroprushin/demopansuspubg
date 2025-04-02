@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Анализ челюсти</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        #upload-section, #result-section {
+            margin: 20px 0;
+        }
+        #image-preview {
+            max-width: 300px;
+            margin: 10px 0;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        #download-logs {
+            margin-top: 20px;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #download-logs:hover {
+            background-color: #45a049;
+        }
+        #prototype {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            color: #888;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Анализ челюсти</h1>
+    <div id="upload-section">
+        <input type="file" id="image-input" accept="image/*">
+        <br>
+        <img id="image-preview" src="" alt="" style="display: none;">
+        <br>
+        <button onclick="processImage()">Анализировать</button>
+    </div>
+    <div id="result-section">
+        <div id="result"></div>
+    </div>
+    <button id="download-logs" onclick="downloadLogs()">Скачать логи</button>
+    <div id="prototype">Beta-porogi-1.3</div>
+
+    <script>
+        document.getElementById('image-input').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const preview = document.getElementById('image-preview');
+                    preview.src = e.target.result;
+                    preview.style.display = 'block';
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        function processImage() {
+            const fileInput = document.getElementById('image-input');
+            const file = fileInput.files[0];
+            if (!file) {
+                alert("Пожалуйста, выберите изображение");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('image', file);
+
+            fetch('/process_image', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    document.getElementById('result').innerHTML = `<p style="color: red;">Ошибка: ${data.error}</p>`;
+                } else {
+                    document.getElementById('result').innerHTML = `
+                        <p><b>Тип челюсти:</b> ${data.jaw_trait}</p>
+                        <p><b>Ширина лица:</b> ${data.face_width.toFixed(2)} px</p>
+                        <p><b>Ширина челюсти:</b> ${data.jaw_width.toFixed(2)} px</p>
+                        <p><b>Соотношение челюсти:</b> ${data.jaw_ratio.toFixed(4)}</p>
+                        <p><b>Асимметрия:</b> ${data.asymmetry.toFixed(4)}</p>
+                        <p><b>Угол наклона головы (pitch):</b> ${data.headpose.pitch_angle.toFixed(2)}°</p>
+                        <p><b>Угол поворота головы (yaw):</b> ${data.headpose.yaw_angle.toFixed(2)}°</p>
+                        <p><b>Угол крена головы (roll):</b> ${data.headpose.roll_angle.toFixed(2)}°</p>
+                    `;
+                }
+            })
+            .catch(error => {
+                document.getElementById('result').innerHTML = `<p style="color: red;">Ошибка: ${error}</p>`;
+            });
+        }
+
+        function downloadLogs() {
+            window.location.href = '/download_logs';
+        }
+    </script>
+</body>
+</html>

@@ -9,11 +9,12 @@ from io import BytesIO
 
 app = Flask(__name__)
 
-API_KEY = "v00GHB3kc6VmuZ2Sufqbx0u_qqt3u07I"
-API_SECRET = "8H7B985VomLOUazkyPqvD5-KkKW-6D_d"
+# Face++ API credentials
+API_KEY = "your_api_key"  # Замени на свой API Key
+API_SECRET = "your_api_secret"  # Замени на свой API Secret
 FACEPP_URL = "https://api-us.faceplusplus.com/facepp/v3/detect"
 
-# Thresholds for jaw classification (Beta-porogi-1.5)
+# Thresholds for jaw classification (Beta-porogi-1.6)
 THRESHOLDS = {
     "челюсть": {
         "узкая": 0.8077,  # jaw_ratio <= 0.8077
@@ -51,7 +52,7 @@ def get_coords(point):
 def distance(point1, point2):
     x1, y1 = get_coords(point1)
     x2, y2 = get_coords(point2)
-    return ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5 if x1 != 0 and y1 != 0 and x2 != 0 and y2 != 0 else 0
+    return ((x2 - x1)  2 + (y2 - y1)  2) ** 0.5 if x1 != 0 and y1 != 0 and x2 != 0 and y2 != 0 else 0
 
 # Function to analyze landmarks
 def analyze_landmarks(landmarks):
@@ -99,6 +100,37 @@ def analyze_landmarks(landmarks):
     except Exception as e:
         print(f"Ошибка в analyze_landmarks: {str(e)}")
         raise
+
+# Function to draw landmarks on the image
+def draw_landmarks(image_data, landmarks):
+    try:
+        # Декодируем изображение
+        img = cv2.imdecode(np.frombuffer(image_data, np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            raise ValueError("Не удалось декодировать изображение для рисования")
+# Рисуем ключевые точки
+        points = [
+            ("contour_left1", landmarks.get("contour_left1")),
+            ("contour_right1", landmarks.get("contour_right1")),
+            ("contour_left9", landmarks.get("contour_left9")),
+            ("contour_right9", landmarks.get("contour_right9")),
+            ("nose_tip", landmarks.get("nose_tip"))
+        ]
+
+        for name, point in points:
+            if point:
+                x, y = point["x"], point["y"]
+                # Рисуем точку (круг) и подпись
+                cv2.circle(img, (int(x), int(y)), 5, (0, 255, 0), -1)  # Зелёный круг
+                cv2.putText(img, name, (int(x) + 10, int(y) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)  # Красная подпись
+
+        # Кодируем изображение обратно в base64
+        _, buffer = cv2.imencode('.jpg', img)
+        img_base64 = base64.b64encode(buffer).decode('utf-8')
+        return img_base64
+    except Exception as e:
+        print(f"Ошибка в draw_landmarks: {str(e)}")
+        return None
 
 # Function to call Face++ API
 def call_facepp_api(image_data):
@@ -156,6 +188,11 @@ def process_image():
         analysis = analyze_landmarks(landmarks)
         analysis["headpose"] = headpose
 
+        # Draw landmarks on the image
+        img_with_landmarks = draw_landmarks(resized_image, landmarks)
+        if img_with_landmarks:
+            analysis["image_with_landmarks"] = f"data:image/jpeg;base64,{img_with_landmarks}"
+
         # Classify jaw trait
         jaw_ratio = analysis["jaw_ratio"]
         if jaw_ratio <= THRESHOLDS["челюсть"]["узкая"]:
@@ -184,7 +221,7 @@ def process_image():
                     logs = []
             else:
                 logs = []
-            logs.append(log_entry)
+                logs.append(log_entry)
             with open(log_file, "w") as f:
                 json.dump(logs, f, indent=4)
         except Exception as e:
@@ -203,5 +240,5 @@ def download_logs():
         return jsonify({"error": "Логи не найдены"}), 404
     return send_file(log_file, as_attachment=True)
 
-if __name__ == '__main__':
+if name == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))

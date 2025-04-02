@@ -10,11 +10,11 @@ from io import BytesIO
 app = Flask(__name__)
 
 # Face++ API credentials
-API_KEY = "v00GHB3kc6VmuZ2Sufqbx0u_qqt3u07I"
-API_SECRET = "8H7B985VomLOUazkyPqvD5-KkKW-6D_d"
+API_KEY = "your_api_key"  # Замени на свой API Key
+API_SECRET = "your_api_secret"  # Замени на свой API Secret
 FACEPP_URL = "https://api-us.faceplusplus.com/facepp/v3/detect"
 
-# Thresholds for jaw classification (Beta-porogi-1.3)
+# Thresholds for jaw classification (Beta-porogi-1.4)
 THRESHOLDS = {
     "челюсть": {
         "узкая": 0.8077,  # jaw_ratio <= 0.8077
@@ -52,7 +52,7 @@ def get_coords(point):
 def distance(point1, point2):
     x1, y1 = get_coords(point1)
     x2, y2 = get_coords(point2)
-    return ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5 if x1 != 0 and y1 != 0 and x2 != 0 and y2 != 0 else 0
+    return ((x2 - x1)  2 + (y2 - y1)  2) ** 0.5 if x1 != 0 and y1 != 0 and x2 != 0 and y2 != 0 else 0
 
 # Function to analyze landmarks
 def analyze_landmarks(landmarks):
@@ -96,14 +96,15 @@ def analyze_landmarks(landmarks):
 # Function to call Face++ API
 def call_facepp_api(image_data):
     try:
-        files = {"image_file": image_data}
-        params = {
-            "api_key": API_KEY,
-            "api_secret": API_SECRET,
-            "return_landmark": "all",
-            "return_attributes": "headpose"
+        # Передаём все параметры как часть multipart/form-data
+        files = {
+            "image_file": ("image.jpg", image_data, "image/jpeg"),
+            "api_key": (None, API_KEY),
+            "api_secret": (None, API_SECRET),
+            "return_landmark": (None, "all"),
+            "return_attributes": (None, "headpose")
         }
-        response = requests.post(FACEPP_URL, files=files, data=params, timeout=10)
+        response = requests.post(FACEPP_URL, files=files, timeout=10)
         response.raise_for_status()
         data = response.json()
 
@@ -115,6 +116,10 @@ def call_facepp_api(image_data):
         headpose = face["attributes"]["headpose"]
 
         return landmarks, headpose
+    except requests.exceptions.HTTPError as e:
+        print(f"Ошибка в call_facepp_api: {str(e)}")
+        print(f"Тело ответа от Face++: {e.response.text}")
+        raise
     except Exception as e:
         print(f"Ошибка в call_facepp_api: {str(e)}")
         raise
@@ -183,5 +188,5 @@ def download_logs():
         return jsonify({"error": "Логи не найдены"}), 404
     return send_file(log_file, as_attachment=True)
 
-if __name__ == '__main__':
+if name == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))

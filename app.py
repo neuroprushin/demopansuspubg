@@ -6,6 +6,9 @@ import base64
 import requests
 from flask import Flask, request, jsonify, send_file, render_template
 from io import BytesIO
+from flask_cors import CORS
+app = Flask(__name__)
+CORS(app)
 
 app = Flask(__name__)
 
@@ -219,7 +222,8 @@ def process_image():
                     print(f"Ошибка: logs.json повреждён, создаём новый")
                     logs = []
             else:
-                logs = []
+                with open(log_file, "r") as f:
+                    logs = json.load(f)
                 logs.append(log_entry)
             with open(log_file, "w") as f:
                 json.dump(logs, f, indent=4)

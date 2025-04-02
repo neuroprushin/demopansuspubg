@@ -10,8 +10,8 @@ from io import BytesIO
 app = Flask(__name__)
 
 # Face++ API credentials
-API_KEY = "your_api_key"  # Замени на свой API Key
-API_SECRET = "your_api_secret"  # Замени на свой API Secret
+API_KEY = "v00GHB3kc6VmuZ2Sufqbx0u_qqt3u07I"
+API_SECRET = "8H7B985VomLOUazkyPqvD5-KkKW-6D_d"
 FACEPP_URL = "https://api-us.faceplusplus.com/facepp/v3/detect"
 
 # Thresholds for jaw classification (Beta-porogi-1.4)

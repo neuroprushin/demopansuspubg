@@ -9,20 +9,19 @@ from io import BytesIO
 
 app = Flask(__name__)
 
-# Face++ API credentials
-API_KEY = "your_api_key"  # Замени на свой API Key
-API_SECRET = "your_api_secret"  # Замени на свой API Secret
+API_KEY = "v00GHB3kc6VmuZ2Sufqbx0u_qqt3u07I"
+API_SECRET = "8H7B985VomLOUazkyPqvD5-KkKW-6D_d"
 FACEPP_URL = "https://api-us.faceplusplus.com/facepp/v3/detect"
 
-# Thresholds for jaw classification (Beta-porogi-1.6)
+# Thresholds for jaw classification (Beta-porogi-1.7)
 THRESHOLDS = {
     "челюсть": {
         "узкая": 0.8077,  # jaw_ratio <= 0.8077
-        "узко_средняя_макс": 0.8600,
-        "средняя_мин": 0.8600,
-        "средняя_макс": 0.8800,
-        "средне_широкая_макс": 0.8968,
-        "широкая": 0.8968  # jaw_ratio >= 0.8968
+        "узко_средняя_макс": 0.8200,
+        "средняя_мин": 0.8200,
+        "средняя_макс": 0.8350,
+        "средне_широкая_макс": 0.8822,
+        "широкая": 0.8822  # jaw_ratio >= 0.8822
     }
 }
 
@@ -52,7 +51,7 @@ def get_coords(point):
 def distance(point1, point2):
     x1, y1 = get_coords(point1)
     x2, y2 = get_coords(point2)
-    return ((x2 - x1)  2 + (y2 - y1)  2) ** 0.5 if x1 != 0 and y1 != 0 and x2 != 0 and y2 != 0 else 0
+    return ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5 if x1 != 0 and y1 != 0 and x2 != 0 and y2 != 0 else 0
 
 # Function to analyze landmarks
 def analyze_landmarks(landmarks):

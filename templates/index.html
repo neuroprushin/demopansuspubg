@@ -61,6 +61,7 @@
     </div>
     <div id="result-section">
         <div id="result"></div>
+        <img id="annotated-image" src="" alt="Результат анализа" style="display: none; max-width: 500px; margin: 20px auto; border: 2px solid #ddd;">
     </div>
     <button id="download-logs" onclick="downloadLogs()">Скачать логи</button>
     <div id="prototype">Beta-porogi-1.7</div>
@@ -99,18 +100,26 @@
                 if (data.error) {
                     document.getElementById('result').innerHTML = `<p style="color: red;">Ошибка: ${data.error}</p>`;
                 } else {
-                    document.getElementById('result').innerHTML = `
-                        <p><b>Тип челюсти:</b> ${data.jaw_trait}</p>
-                        <p><b>Ширина лица:</b> ${data.face_width.toFixed(2)} px</p>
-                        <p><b>Ширина челюсти:</b> ${data.jaw_width.toFixed(2)} px</p>
-                        <p><b>Соотношение челюсти:</b> ${data.jaw_ratio.toFixed(4)}</p>
-                        <p><b>Асимметрия:</b> ${data.asymmetry.toFixed(4)}</p>
-                        <p><b>Угол наклона головы (pitch):</b> ${data.headpose.pitch_angle.toFixed(2)}°</p>
-                        <p><b>Угол поворота головы (yaw):</b> ${data.headpose.yaw_angle.toFixed(2)}°</p>
-                        <p><b>Угол крена головы (roll):</b> ${data.headpose.roll_angle.toFixed(2)}°</p>
-                    `;
+                document.getElementById('result').innerHTML = `
+                    <p><b>Тип челюсти:</b> ${data.jaw_trait}</p>
+                    <p><b>Ширина лица:</b> ${data.face_width.toFixed(2)} px</p>
+                    <p><b>Ширина челюсти:</b> ${data.jaw_width.toFixed(2)} px</p>
+                    <p><b>Соотношение челюсти:</b> ${data.jaw_ratio.toFixed(4)}</p>
+                    <p><b>Асимметрия:</b> ${data.asymmetry.toFixed(4)}</p>
+                    <p><b>Угол наклона головы (pitch):</b> ${data.headpose.pitch_angle.toFixed(2)}°</p>
+                    <p><b>Угол поворота головы (yaw):</b> ${data.headpose.yaw_angle.toFixed(2)}°</p>
+                    <p><b>Угол крена головы (roll):</b> ${data.headpose.roll_angle.toFixed(2)}°</p>
+                `;
+                // Добавляем отображение картинки с линиями
+                const annotatedImg = document.getElementById('annotated-image');
+                if (data.annotated_image) {
+                    annotatedImg.src = data.annotated_image;
+                    annotatedImg.style.display = 'block';
+                } else {
+                    annotatedImg.style.display = 'none';
                 }
-            })
+            }
+        })
             .catch(error => {
                 document.getElementById('result').innerHTML = `<p style="color: red;">Ошибка: ${error}</p>`;
             });

@@ -100,6 +100,59 @@ def analyze_landmarks(landmarks):
         print(f"Ошибка в analyze_landmarks: {str(e)}")
         raise
 
+def draw_landmarks(image_data, landmarks):
+    try:
+        img = cv2.imdecode(np.frombuffer(image_data, np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            raise ValueError("Не удалось декодировать изображение")
+
+        # Точки для линий
+        points = {
+            'temple_left': landmarks.get('contour_left1'),
+            'temple_right': landmarks.get('contour_right1'),
+            'jaw_left': landmarks.get('contour_left9'),
+            'jaw_right': landmarks.get('contour_right9'),
+            'nose_tip': landmarks.get('nose_tip')
+        }
+
+        # Рисуем линии (красные)
+        line_color = (0, 0, 255)  # BGR
+        # Левая сторона: висок -> челюсть -> нос
+        if points['temple_left'] and points['jaw_left']:
+            cv2.line(img, 
+                     (int(points['temple_left']['x']), int(points['temple_left']['y'])),
+                     (int(points['jaw_left']['x']), int(points['jaw_left']['y'])),
+                     line_color, 2)
+        if points['jaw_left'] and points['nose_tip']:
+            cv2.line(img,
+                     (int(points['jaw_left']['x']), int(points['jaw_left']['y'])),
+                     (int(points['nose_tip']['x']), int(points['nose_tip']['y'])),
+                     line_color, 2)
+
+        # Правая сторона: висок -> челюсть -> нос
+        if points['temple_right'] and points['jaw_right']:
+            cv2.line(img,
+                     (int(points['temple_right']['x']), int(points['temple_right']['y'])),
+                     (int(points['jaw_right']['x']), int(points['jaw_right']['y'])),
+                     line_color, 2)
+        if points['jaw_right'] and points['nose_tip']:
+            cv2.line(img,
+                     (int(points['jaw_right']['x']), int(points['jaw_right']['y'])),
+                     (int(points['nose_tip']['x']), int(points['nose_tip']['y'])),
+                     line_color, 2)
+
+        # Рисуем точки (зеленые)
+        for name, point in points.items():
+            if point:
+                x, y = int(point['x']), int(point['y'])
+                cv2.circle(img, (x, y), 5, (0, 255, 0), -1)  # Зеленый
+
+        _, buffer = cv2.imencode('.jpg', img)
+        return base64.b64encode(buffer).decode('utf-8')
+    except Exception as e:
+        print(f"Ошибка в draw_landmarks: {str(e)}")
+        return None
+
 # Function to call Face++ API
 def call_facepp_api(image_data):
     try:
@@ -170,6 +223,10 @@ def process_image():
             jaw_trait = "Широкая челюсть"
 
         analysis["jaw_trait"] = jaw_trait
+
+        annotated_image = draw_landmarks(resized_image, landmarks)
+        if annotated_image:
+            analysis["annotated_image"] = f"data:image/jpeg;base64,{annotated_image}"
 
         # Save to logs
         log_entry = analysis.copy()

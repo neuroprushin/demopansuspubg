@@ -18,7 +18,7 @@
         #upload-section, #result-section {
             margin: 20px 0;
         }
-        #image-preview, #landmarks-image {
+        #image-preview {
             max-width: 300px;
             margin: 10px 0;
         }
@@ -61,10 +61,9 @@
     </div>
     <div id="result-section">
         <div id="result"></div>
-        <img id="landmarks-image" src="" alt="Изображение с точками" style="display: none; max-width: 300px; margin-top: 10px;">
     </div>
     <button id="download-logs" onclick="downloadLogs()">Скачать логи</button>
-    <div id="prototype">Beta-porogi-1.6</div>
+    <div id="prototype">Beta-porogi-1.7</div>
 
     <script>
         document.getElementById('image-input').addEventListener('change', function(event) {
@@ -91,14 +90,14 @@
             const formData = new FormData();
             formData.append('image', file);
 
-            fetch('/process_image', { ... })
+            fetch('/process_image', {
                 method: 'POST',
                 body: formData
             })
             .then(response => response.json())
             .then(data => {
                 if (data.error) {
-                    document.getElementById('result').innerHTML = <p style="color: red;">Ошибка: ${data.error}</p>;
+                    document.getElementById('result').innerHTML = `<p style="color: red;">Ошибка: ${data.error}</p>`;
                 } else {
                     document.getElementById('result').innerHTML = `
                         <p><b>Тип челюсти:</b> ${data.jaw_trait}</p>
@@ -110,18 +109,10 @@
                         <p><b>Угол поворота головы (yaw):</b> ${data.headpose.yaw_angle.toFixed(2)}°</p>
                         <p><b>Угол крена головы (roll):</b> ${data.headpose.roll_angle.toFixed(2)}°</p>
                     `;
-                    // Отображаем изображение с точками, если оно есть
-                    const landmarksImage = document.getElementById('landmarks-image');
-                    if (data.image_with_landmarks) {
-                        landmarksImage.src = data.image_with_landmarks;
-                        landmarksImage.style.display = 'block';
-                    } else {
-                        landmarksImage.style.display = 'none';
-                    }
                 }
             })
             .catch(error => {
-                document.getElementById('result').innerHTML = `<p style="color: red;">Ошибка: ${data.error}</p>`;
+                document.getElementById('result').innerHTML = `<p style="color: red;">Ошибка: ${error}</p>`;
             });
         }
 

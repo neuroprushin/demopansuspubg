@@ -6,9 +6,6 @@ import base64
 import requests
 from flask import Flask, request, jsonify, send_file, render_template
 from io import BytesIO
-from flask_cors import CORS
-app = Flask(__name__)
-CORS(app)
 
 app = Flask(__name__)
 
@@ -103,37 +100,6 @@ def analyze_landmarks(landmarks):
         print(f"Ошибка в analyze_landmarks: {str(e)}")
         raise
 
-# Function to draw landmarks on the image
-def draw_landmarks(image_data, landmarks):
-    try:
-        # Декодируем изображение
-        img = cv2.imdecode(np.frombuffer(image_data, np.uint8), cv2.IMREAD_COLOR)
-        if img is None:
-            raise ValueError("Не удалось декодировать изображение для рисования")
-# Рисуем ключевые точки
-        points = [
-            ("contour_left1", landmarks.get("contour_left1")),
-            ("contour_right1", landmarks.get("contour_right1")),
-            ("contour_left9", landmarks.get("contour_left9")),
-            ("contour_right9", landmarks.get("contour_right9")),
-            ("nose_tip", landmarks.get("nose_tip"))
-        ]
-
-        for name, point in points:
-            if point:
-                x, y = point["x"], point["y"]
-                # Рисуем точку (круг) и подпись
-                cv2.circle(img, (int(x), int(y)), 5, (0, 255, 0), -1)  # Зелёный круг
-                cv2.putText(img, name, (int(x) + 10, int(y) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)  # Красная подпись
-
-        # Кодируем изображение обратно в base64
-        _, buffer = cv2.imencode('.jpg', img)
-        img_base64 = base64.b64encode(buffer).decode('utf-8')
-        return img_base64
-    except Exception as e:
-        print(f"Ошибка в draw_landmarks: {str(e)}")
-        return None
-
 # Function to call Face++ API
 def call_facepp_api(image_data):
     try:
@@ -190,11 +156,6 @@ def process_image():
         analysis = analyze_landmarks(landmarks)
         analysis["headpose"] = headpose
 
-        # Draw landmarks on the image
-        img_with_landmarks = draw_landmarks(resized_image, landmarks)
-        if img_with_landmarks:
-            analysis["image_with_landmarks"] = f"data:image/jpeg;base64,{img_with_landmarks}"
-
         # Classify jaw trait
         jaw_ratio = analysis["jaw_ratio"]
         if jaw_ratio <= THRESHOLDS["челюсть"]["узкая"]:
@@ -222,9 +183,8 @@ def process_image():
                     print(f"Ошибка: logs.json повреждён, создаём новый")
                     logs = []
             else:
-                with open(log_file, "r") as f:
-                    logs = json.load(f)
-                logs.append(log_entry)
+                logs = []
+            logs.append(log_entry)
             with open(log_file, "w") as f:
                 json.dump(logs, f, indent=4)
         except Exception as e:

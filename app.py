@@ -13,15 +13,14 @@ API_KEY = "v00GHB3kc6VmuZ2Sufqbx0u_qqt3u07I"
 API_SECRET = "8H7B985VomLOUazkyPqvD5-KkKW-6D_d"
 FACEPP_URL = "https://api-us.faceplusplus.com/facepp/v3/detect"
 
-# Thresholds for jaw classification (Beta-porogi-1.7)
 THRESHOLDS = {
     "челюсть": {
         "узкая": 0.8077,  # jaw_ratio <= 0.8077
         "узко_средняя_макс": 0.8200,
         "средняя_мин": 0.8200,
         "средняя_макс": 0.8350,
-        "средне_широкая_макс": 0.8822,
-        "широкая": 0.8822  # jaw_ratio >= 0.8822
+        "средне_широкая_макс": 0.8819,
+        "широкая": 0.8819  # jaw_ratio >= 0.8819
     }
 }
 
@@ -228,7 +227,6 @@ def process_image():
         if annotated_image:
             analysis["annotated_image"] = f"data:image/jpeg;base64,{annotated_image}"
 
-        # Save to logs
         log_entry = analysis.copy()
         log_file = "logs.json"
         try:
@@ -246,7 +244,6 @@ def process_image():
                 json.dump(logs, f, indent=4)
         except Exception as e:
             print(f"Ошибка при сохранении логов: {str(e)}")
-            # Продолжаем работу, даже если логи не удалось сохранить
 
         return jsonify(analysis)
     except Exception as e:

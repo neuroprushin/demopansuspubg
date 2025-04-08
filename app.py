@@ -2,193 +2,107 @@ import os
 import cv2
 import numpy as np
 import json
-import base64
-import requests
+import mediapipe as mp
 from flask import Flask, request, jsonify, send_file, render_template
 from io import BytesIO
 
 app = Flask(__name__)
 
-API_KEY = "v00GHB3kc6VmuZ2Sufqbx0u_qqt3u07I"
-API_SECRET = "8H7B985VomLOUazkyPqvD5-KkKW-6D_d"
-FACEPP_URL = "https://api-us.faceplusplus.com/facepp/v3/detect"
+# Инициализация FaceMesh
+mp_face_mesh = mp.solutions.face_mesh
+face_mesh = mp_face_mesh.FaceMesh(max_num_faces=1, refine_landmarks=True)
 
+# Пороги (Beta-porogi-1.9)
 THRESHOLDS = {
     "челюсть": {
-        "узкая": 0.8077,  # jaw_ratio <= 0.8077
+        "узкая": 0.8077,
         "узко_средняя_макс": 0.8200,
-        "средняя_мин": 0.8200,
-        "средняя_макс": 0.8350,
+        "средняя_мин": 0.8260,
+        "средняя_макс": 0.8400,
         "средне_широкая_макс": 0.8819,
-        "широкая": 0.8819  # jaw_ratio >= 0.8819
+        "широкая": 0.8819
     }
 }
 
-# Function to resize image
 def resize_image(image_data, max_size=800):
-    try:
-        img = cv2.imdecode(np.frombuffer(image_data, np.uint8), cv2.IMREAD_COLOR)
-        if img is None:
-            raise ValueError("Не удалось декодировать изображение")
-        height, width = img.shape[:2]
-        if max(height, width) > max_size:
-            scale = max_size / max(height, width)
-            new_width = int(width * scale)
-            new_height = int(height * scale)
-            img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
-        _, buffer = cv2.imencode('.jpg', img)
-        return buffer.tobytes()
-    except Exception as e:
-        print(f"Ошибка в resize_image: {str(e)}")
-        raise
+    img = cv2.imdecode(np.frombuffer(image_data, np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError("Не удалось декодировать изображение")
+    height, width = img.shape[:2]
+    if max(height, width) > max_size:
+        scale = max_size / max(height, width)
+        new_width = int(width * scale)
+        new_height = int(height * scale)
+        img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+    _, buffer = cv2.imencode('.jpg', img)
+    return buffer.tobytes()
 
-# Function to get coordinates from landmark point
-def get_coords(point):
-    return point.get("x", 0), point.get("y", 0)
+def get_coords(landmark, width, height):
+    return int(landmark.x * width), int(landmark.y * height)
 
-# Function to calculate distance between two points
-def distance(point1, point2):
-    x1, y1 = get_coords(point1)
-    x2, y2 = get_coords(point2)
-    return ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5 if x1 != 0 and y1 != 0 and x2 != 0 and y2 != 0 else 0
+def distance(x1, y1, x2, y2):
+    return ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
 
-# Function to analyze landmarks
-def analyze_landmarks(landmarks):
-    try:
-        temple_left = landmarks.get("contour_left1")
-        temple_right = landmarks.get("contour_right1")
-        jaw_left = landmarks.get("contour_left9")
-        jaw_right = landmarks.get("contour_right9")
-        nose_tip = landmarks.get("nose_tip")
+def analyze_landmarks(image_data):
+    img = cv2.imdecode(np.frombuffer(image_data, np.uint8), cv2.IMREAD_COLOR)
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    results = face_mesh.process(img_rgb)
 
-        # Проверяем, все ли точки найдены
-        missing_points = [name for name, point in [
-            ("contour_left1", temple_left),
-            ("contour_right1", temple_right),
-            ("contour_left9", jaw_left),
-            ("contour_right9", jaw_right),
-            ("nose_tip", nose_tip)
-        ] if point is None]
-        if missing_points:
-            raise ValueError(f"Не удалось извлечь ключевые точки: {missing_points}")
+    if not results.multi_face_landmarks:
+        raise ValueError("Лицо не обнаружено FaceMesh")
 
-        face_width = distance(temple_left, temple_right)
-        jaw_width = distance(jaw_left, jaw_right)
-        jaw_ratio = jaw_width / face_width if face_width > 0 else 0
-        jaw_diff = jaw_width - face_width
+    landmarks = results.multi_face_landmarks[0].landmark
+    height, width, _ = img.shape
 
-        left_jaw_dist = distance(jaw_left, nose_tip)
-        right_jaw_dist = distance(jaw_right, nose_tip)
-        asymmetry = abs(left_jaw_dist - right_jaw_dist) / max(left_jaw_dist, right_jaw_dist) if max(left_jaw_dist, right_jaw_dist) > 0 else 0
+    # Точки висков и челюсти (примерные индексы)
+    temple_left = landmarks[127]  # Левый висок
+    temple_right = landmarks[356]  # Правый висок
+    jaw_left = landmarks[172]  # Левая точка челюсти
+    jaw_right = landmarks[397]  # Правая точка челюсти
+    nose_tip = landmarks[1]  # Кончик носа
 
-        return {
-            "face_width": face_width,
-            "jaw_width": jaw_width,
-            "jaw_ratio": jaw_ratio,
-            "jaw_diff": jaw_diff,
-            "asymmetry": asymmetry,
-            "left_jaw_dist": left_jaw_dist,
-            "right_jaw_dist": right_jaw_dist,
-            "temple_left": [temple_left["x"], temple_left["y"]],
-            "temple_right": [temple_right["x"], temple_right["y"]],
-            "jaw_left": [jaw_left["x"], jaw_left["y"]],
-            "jaw_right": [jaw_right["x"], jaw_right["y"]],
-            "nose_tip": [nose_tip["x"], nose_tip["y"]]
-        }
-    except Exception as e:
-        print(f"Ошибка в analyze_landmarks: {str(e)}")
-        raise
+    # Координаты
+    x_temple_left, y_temple_left = get_coords(temple_left, width, height)
+    x_temple_right, y_temple_right = get_coords(temple_right, width, height)
+    x_jaw_left, y_jaw_left = get_coords(jaw_left, width, height)
+    x_jaw_right, y_jaw_right = get_coords(jaw_right, width, height)
+    x_nose_tip, y_nose_tip = get_coords(nose_tip, width, height)
 
-def draw_landmarks(image_data, landmarks):
-    try:
-        img = cv2.imdecode(np.frombuffer(image_data, np.uint8), cv2.IMREAD_COLOR)
-        if img is None:
-            raise ValueError("Не удалось декодировать изображение")
+    # Расчёты
+    face_width = distance(x_temple_left, y_temple_left, x_temple_right, y_temple_right)
+    jaw_width = distance(x_jaw_left, y_jaw_left, x_jaw_right, y_jaw_right)
+    jaw_ratio = jaw_width / face_width if face_width > 0 else 0
+    jaw_diff = jaw_width - face_width
 
-        # Точки для линий
-        points = {
-            'temple_left': landmarks.get('contour_left1'),
-            'temple_right': landmarks.get('contour_right1'),
-            'jaw_left': landmarks.get('contour_left9'),
-            'jaw_right': landmarks.get('contour_right9'),
-            'nose_tip': landmarks.get('nose_tip')
-        }
+    left_jaw_dist = distance(x_jaw_left, y_jaw_left, x_nose_tip, y_nose_tip)
+    right_jaw_dist = distance(x_jaw_right, y_jaw_right, x_nose_tip, y_nose_tip)
+    asymmetry = abs(left_jaw_dist - right_jaw_dist) / max(left_jaw_dist, right_jaw_dist) if max(left_jaw_dist, right_jaw_dist) > 0 else 0
 
-        # Рисуем линии (красные)
-        line_color = (0, 0, 255)  # BGR
-        # Левая сторона: висок -> челюсть -> нос
-        if points['temple_left'] and points['jaw_left']:
-            cv2.line(img, 
-                     (int(points['temple_left']['x']), int(points['temple_left']['y'])),
-                     (int(points['jaw_left']['x']), int(points['jaw_left']['y'])),
-                     line_color, 2)
-        if points['jaw_left'] and points['nose_tip']:
-            cv2.line(img,
-                     (int(points['jaw_left']['x']), int(points['jaw_left']['y'])),
-                     (int(points['nose_tip']['x']), int(points['nose_tip']['y'])),
-                     line_color, 2)
+    # Сравнение с линией от виска вниз
+    left_deviation = x_jaw_left - x_temple_left
+    right_deviation = x_jaw_right - x_temple_right
 
-        # Правая сторона: висок -> челюсть -> нос
-        if points['temple_right'] and points['jaw_right']:
-            cv2.line(img,
-                     (int(points['temple_right']['x']), int(points['temple_right']['y'])),
-                     (int(points['jaw_right']['x']), int(points['jaw_right']['y'])),
-                     line_color, 2)
-        if points['jaw_right'] and points['nose_tip']:
-            cv2.line(img,
-                     (int(points['jaw_right']['x']), int(points['jaw_right']['y'])),
-                     (int(points['nose_tip']['x']), int(points['nose_tip']['y'])),
-                     line_color, 2)
+    return {
+        "face_width": face_width,
+        "jaw_width": jaw_width,
+        "jaw_ratio": jaw_ratio,
+        "jaw_diff": jaw_diff,
+        "asymmetry": asymmetry,
+        "left_jaw_dist": left_jaw_dist,
+        "right_jaw_dist": right_jaw_dist,
+        "temple_left": [x_temple_left, y_temple_left],
+        "temple_right": [x_temple_right, y_temple_right],
+        "jaw_left": [x_jaw_left, y_jaw_left],
+        "jaw_right": [x_jaw_right, y_jaw_right],
+        "nose_tip": [x_nose_tip, y_nose_tip],
+        "left_deviation": left_deviation,
+        "right_deviation": right_deviation
+    }
 
-        # Рисуем точки (зеленые)
-        for name, point in points.items():
-            if point:
-                x, y = int(point['x']), int(point['y'])
-                cv2.circle(img, (x, y), 5, (0, 255, 0), -1)  # Зеленый
-
-        _, buffer = cv2.imencode('.jpg', img)
-        return base64.b64encode(buffer).decode('utf-8')
-    except Exception as e:
-        print(f"Ошибка в draw_landmarks: {str(e)}")
-        return None
-
-# Function to call Face++ API
-def call_facepp_api(image_data):
-    try:
-        # Передаём все параметры как часть multipart/form-data
-        files = {
-            "image_file": ("image.jpg", image_data, "image/jpeg"),
-            "api_key": (None, API_KEY),
-            "api_secret": (None, API_SECRET),
-            "return_landmark": (None, "2"),  # Используем 106 точек
-            "return_attributes": (None, "headpose")
-        }
-        response = requests.post(FACEPP_URL, files=files, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-
-        if not data.get("faces"):
-            raise ValueError("Лицо не обнаружено на изображении")
-
-        face = data["faces"][0]
-        landmarks = face["landmark"]
-        headpose = face["attributes"]["headpose"]
-
-        return landmarks, headpose
-    except requests.exceptions.HTTPError as e:
-        print(f"Ошибка в call_facepp_api: {str(e)}")
-        print(f"Тело ответа от Face++: {e.response.text}")
-        raise
-    except Exception as e:
-        print(f"Ошибка в call_facepp_api: {str(e)}")
-        raise
-
-# Route for the main page
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# Route to process image
 @app.route('/process_image', methods=['POST'])
 def process_image():
     try:
@@ -198,34 +112,29 @@ def process_image():
         image_file = request.files['image']
         image_data = image_file.read()
 
-        # Resize image
         resized_image = resize_image(image_data)
+        analysis = analyze_landmarks(resized_image)
 
-        # Call Face++ API
-        landmarks, headpose = call_facepp_api(resized_image)
-
-        # Analyze landmarks
-        analysis = analyze_landmarks(landmarks)
-        analysis["headpose"] = headpose
-
-        # Classify jaw trait
+        # Классификация
         jaw_ratio = analysis["jaw_ratio"]
-        if jaw_ratio <= THRESHOLDS["челюсть"]["узкая"]:
+        left_deviation = analysis["left_deviation"]
+        right_deviation = analysis["right_deviation"]
+
+        if left_deviation < -10 and right_deviation > 10:
             jaw_trait = "Узкая челюсть"
-        elif jaw_ratio <= THRESHOLDS["челюсть"]["узко_средняя_макс"]:
-            jaw_trait = "Узко-средняя челюсть"
-        elif jaw_ratio <= THRESHOLDS["челюсть"]["средняя_макс"]:
-            jaw_trait = "Средняя челюсть"
-        elif jaw_ratio < THRESHOLDS["челюсть"]["средне_широкая_макс"]:
-            jaw_trait = "Средне-широкая челюсть"
         else:
-            jaw_trait = "Широкая челюсть"
+            if jaw_ratio <= THRESHOLDS["челюсть"]["узкая"]:
+                jaw_trait = "Узкая челюсть"
+            elif jaw_ratio <= THRESHOLDS["челюсть"]["узко_средняя_макс"]:
+                jaw_trait = "Узко-средняя челюсть"
+            elif jaw_ratio <= THRESHOLDS["челюсть"]["средняя_макс"]:
+                jaw_trait = "Средняя челюсть"
+            elif jaw_ratio < THRESHOLDS["челюсть"]["средне_широкая_макс"]:
+                jaw_trait = "Средне-широкая челюсть"
+            else:
+                jaw_trait = "Широкая челюсть"
 
         analysis["jaw_trait"] = jaw_trait
-
-        annotated_image = draw_landmarks(resized_image, landmarks)
-        if annotated_image:
-            analysis["annotated_image"] = f"data:image/jpeg;base64,{annotated_image}"
 
         log_entry = analysis.copy()
         log_file = "logs.json"
@@ -249,7 +158,6 @@ def process_image():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Route to download logs
 @app.route('/download_logs')
 def download_logs():
     log_file = "logs.json"
